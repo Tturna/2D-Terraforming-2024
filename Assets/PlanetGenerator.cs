@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 public class PlanetGenerator : MonoBehaviour
 {
@@ -12,7 +11,6 @@ public class PlanetGenerator : MonoBehaviour
     }
     
     public ComputeShader planetGenCs;
-    public Texture2D sourceTexture;
     public int resolution;
     [Range(0f, 1f)]
     public float isoValue;
@@ -24,26 +22,18 @@ public class PlanetGenerator : MonoBehaviour
     
     private readonly List<Vector3> _vertices = new();
     private readonly List<int> _triangleInts = new();
-    private Mesh _mesh;
     private MeshFilter _meshFilter;
     private ComputeBuffer _triangleBuffer;
     private ComputeBuffer _triangleCountBuffer;
 
     private void Start()
     {
-        _mesh = new Mesh();
-        // TODO: Use UInt16 index format when you have chunks
-        _mesh.indexFormat = IndexFormat.UInt32;
-        
-        var go = new GameObject("Planet");
-        go.AddComponent<MeshFilter>().mesh = _mesh;
-        go.AddComponent<MeshRenderer>().material = new Material(Shader.Find("Unlit/Texture"));
-        
-        _triangleBuffer = new ComputeBuffer((resolution - 1) * (resolution - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
+        _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
         _triangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-        planetGenCs.SetFloat("resolution", resolution);
-        planetGenCs.SetTexture(0, "source", sourceTexture);
         
+        planetGenCs.SetInt("res", resolution);
+        // planetGenCs.SetTexture(0, "source", sourceTexture);
+        planetGenCs.SetInt("chunks_per_side", chunksPerAxis);
         planetGenCs.SetBuffer(0, "triangles", _triangleBuffer);
         
         GeneratePlanet();
@@ -56,13 +46,35 @@ public class PlanetGenerator : MonoBehaviour
 
     private void GeneratePlanet()
     {
-        _triangleBuffer.SetCounterValue(0);
-        
         planetGenCs.SetFloat("iso_value", isoValue);
         planetGenCs.SetFloat("noise_scale", noiseScale);
         planetGenCs.SetFloat("noise_offset_x", noiseOffset.x);
         planetGenCs.SetFloat("noise_offset_y", noiseOffset.y);
-        planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
+
+        for (var y = 0; y < chunksPerAxis; y++)
+        {
+            for (var x = 0; x < chunksPerAxis; x++)
+            {
+                Debug.Log($"Generating chunk {x}, {y}");
+                GenerateChunk(x, y);
+            }
+        }
+        
+        _triangleBuffer.Release();
+        _triangleCountBuffer.Release();
+        
+        Debug.Log("Planet generated");
+    }
+
+    private void GenerateChunk(int x, int y)
+    {
+        planetGenCs.SetInt("chunk_x", x);
+        planetGenCs.SetInt("chunk_y", y);
+        
+        _triangleBuffer.SetCounterValue(0);
+        
+        // planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
+        planetGenCs.Dispatch(0, 4, 4, 1);
         
         var triangleCount = new int[1];
         _triangleCountBuffer.SetData(triangleCount);
@@ -72,7 +84,7 @@ public class PlanetGenerator : MonoBehaviour
         var triangles = new Triangle[triangleCount[0]];
         _triangleBuffer.GetData(triangles, 0, 0, triangleCount[0]);
 
-        // This system generates duplicate vertices
+        // This system generates duplicate vertices between cells
         _vertices.Clear();
         _triangleInts.Clear();
 
@@ -87,14 +99,17 @@ public class PlanetGenerator : MonoBehaviour
             _triangleInts.Add(i * 3 + 2);
         }
         
-        _mesh.vertices = _vertices.ToArray();
-        _mesh.triangles = _triangleInts.ToArray();
-        _mesh.RecalculateBounds();
+        var mesh = new Mesh();
+        // mesh.indexFormat = IndexFormat.UInt32;
         
-        // _triangleBuffer.Release();
-        // _triangleCountBuffer.Release();
+        var go = new GameObject("Chunk");
+        go.AddComponent<MeshFilter>().mesh = mesh;
+        go.AddComponent<MeshRenderer>().material = new Material(Shader.Find("Unlit/Texture"));
+        // var polyCollider = go.AddComponent<PolygonCollider2D>();
         
-        // Debug.Log("Planet generated");
+        mesh.vertices = _vertices.ToArray();
+        mesh.triangles = _triangleInts.ToArray();
+        mesh.RecalculateBounds();
     }
 
     // private void OnDrawGizmos()

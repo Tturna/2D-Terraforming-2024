@@ -168,9 +168,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   planetGenCs: {fileID: 7200000, guid: 67355c2569bf425abdb39eb857f49d40, type: 3}
-  sourceTexture: {fileID: 2800000, guid: c61dd72a308e7d447953c78a81ddb35b, type: 3}
   resolution: 256
   isoValue: 0.56
+  chunksPerAxis: 4
   noiseScale: 5
   noiseOffset: {x: 0, y: 0}
 --- !u!1 &519420028
