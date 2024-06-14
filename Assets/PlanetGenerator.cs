@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class PlanetGenerator : MonoBehaviour
 {
@@ -17,7 +18,7 @@ public class PlanetGenerator : MonoBehaviour
         public Vector2 VertexB;
     }
     
-    public ComputeShader planetGenCs;
+    [FormerlySerializedAs("planetGenCs")] public ComputeShader chunkGeneratorCs;
     public int resolution;
     [Range(0f, 1f)]
     public float isoValue;
@@ -27,31 +28,25 @@ public class PlanetGenerator : MonoBehaviour
     public float noiseScale;
     public Vector2 noiseOffset;
     
-    // private readonly List<Vector3> _vertices = new();
     private readonly List<int> _triangleInts = new();
     private MeshFilter _meshFilter;
     
-    private ComputeBuffer _innerTriangleBuffer;
-    private ComputeBuffer _innerTriangleCountBuffer;
-    private ComputeBuffer _outerTriangleBuffer;
-    private ComputeBuffer _outerTriangleCountBuffer;
+    private ComputeBuffer _triangleBuffer;
+    private ComputeBuffer _triangleCountBuffer;
     private ComputeBuffer _boundaryEdgeBuffer;
     private ComputeBuffer _boundaryEdgeCountBuffer;
 
     private void Start()
     {
-        _innerTriangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
-        _outerTriangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
+        _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
         _boundaryEdgeBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 4, ComputeBufferType.Append);
-        _innerTriangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-        _outerTriangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
+        _triangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
         _boundaryEdgeCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
         
-        planetGenCs.SetInt("res", resolution);
-        planetGenCs.SetInt("chunks_per_side", chunksPerAxis);
-        planetGenCs.SetBuffer(0, "inner_triangles", _innerTriangleBuffer);
-        planetGenCs.SetBuffer(0, "outer_triangles", _outerTriangleBuffer);
-        planetGenCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
+        chunkGeneratorCs.SetInt("res", resolution);
+        chunkGeneratorCs.SetInt("chunks_per_side", chunksPerAxis);
+        chunkGeneratorCs.SetBuffer(0, "triangles", _triangleBuffer);
+        chunkGeneratorCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
         
         GeneratePlanet();
     }
@@ -63,10 +58,10 @@ public class PlanetGenerator : MonoBehaviour
 
     private void GeneratePlanet()
     {
-        planetGenCs.SetFloat("iso_value", isoValue);
-        planetGenCs.SetFloat("noise_scale", noiseScale);
-        planetGenCs.SetFloat("noise_offset_x", noiseOffset.x);
-        planetGenCs.SetFloat("noise_offset_y", noiseOffset.y);
+        chunkGeneratorCs.SetFloat("iso_value", isoValue);
+        chunkGeneratorCs.SetFloat("noise_scale", noiseScale);
+        chunkGeneratorCs.SetFloat("noise_offset_x", noiseOffset.x);
+        chunkGeneratorCs.SetFloat("noise_offset_y", noiseOffset.y);
 
         for (var y = 0; y < chunksPerAxis; y++)
         {
@@ -80,48 +75,40 @@ public class PlanetGenerator : MonoBehaviour
             }
         }
         
-        _innerTriangleBuffer.Release();
-        _outerTriangleBuffer.Release();
-        _innerTriangleCountBuffer.Release();
-        _outerTriangleCountBuffer.Release();
+        _triangleBuffer.Release();
+        _triangleCountBuffer.Release();
         _boundaryEdgeBuffer.Release();
         _boundaryEdgeCountBuffer.Release();
     }
 
     private void GenerateChunk(int x, int y)
     {
-        planetGenCs.SetInt("chunk_x", x);
-        planetGenCs.SetInt("chunk_y", y);
+        chunkGeneratorCs.SetInt("chunk_x", x);
+        chunkGeneratorCs.SetInt("chunk_y", y);
         
-        _innerTriangleBuffer.SetCounterValue(1);
-        _outerTriangleBuffer.SetCounterValue(1);
+        _triangleBuffer.SetCounterValue(1);
         _boundaryEdgeBuffer.SetCounterValue(1);
         
         // planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
-        planetGenCs.Dispatch(0, 4, 4, 1);
+        chunkGeneratorCs.Dispatch(0, 4, 4, 1);
         
         var innerTriangleCount = new int[1];
         var outerTriangleCount = new int[1];
         var boundaryEdgeCount = new int[1];
         
-        _innerTriangleCountBuffer.SetData(innerTriangleCount);
-        _outerTriangleCountBuffer.SetData(outerTriangleCount);
+        _triangleCountBuffer.SetData(outerTriangleCount);
         _boundaryEdgeCountBuffer.SetData(boundaryEdgeCount);
         
-        ComputeBuffer.CopyCount(_innerTriangleBuffer, _innerTriangleCountBuffer, 0);
-        ComputeBuffer.CopyCount(_outerTriangleBuffer, _outerTriangleCountBuffer, 0);
+        ComputeBuffer.CopyCount(_triangleBuffer, _triangleCountBuffer, 0);
         ComputeBuffer.CopyCount(_boundaryEdgeBuffer, _boundaryEdgeCountBuffer, 0);
         
-        _innerTriangleCountBuffer.GetData(innerTriangleCount, 0, 0, 1);
-        _outerTriangleCountBuffer.GetData(outerTriangleCount, 0, 0, 1);
+        _triangleCountBuffer.GetData(outerTriangleCount, 0, 0, 1);
         _boundaryEdgeCountBuffer.GetData(boundaryEdgeCount, 0, 0, 1);
         
-        var innerTriangles = new Triangle[innerTriangleCount[0]];
-        var outerTriangles = new Triangle[outerTriangleCount[0]];
+        var triangles = new Triangle[outerTriangleCount[0]];
         var boundaryEdges = new Edge[boundaryEdgeCount[0]];
         
-        _innerTriangleBuffer.GetData(innerTriangles, 0, 0, innerTriangleCount[0]);
-        _outerTriangleBuffer.GetData(outerTriangles, 0, 0, outerTriangleCount[0]);
+        _triangleBuffer.GetData(triangles, 0, 0, outerTriangleCount[0]);
         _boundaryEdgeBuffer.GetData(boundaryEdges, 0, 0, boundaryEdgeCount[0]);
 
         _triangleInts.Clear();
@@ -133,15 +120,26 @@ public class PlanetGenerator : MonoBehaviour
         // We use a dictionary to keep track of the unique vertices and their indices to ignore duplicates.
         Dictionary<Vector3, int> vertexIndices = new();
 
-        // TODO: Consider if there's any point in separating the inner and outer triangles.
-        foreach (var tri in innerTriangles)
+        foreach (var tri in triangles)
         {
-            AddTriangle(tri);
-        }
-        
-        foreach (var tri in outerTriangles)
-        {
-            AddTriangle(tri);
+            if (!vertexIndices.ContainsKey(tri.VertexA))
+            {
+                vertexIndices[tri.VertexA] = vertexIndices.Count;
+            }
+            
+            if (!vertexIndices.ContainsKey(tri.VertexB))
+            {
+                vertexIndices[tri.VertexB] = vertexIndices.Count;
+            }
+            
+            if (!vertexIndices.ContainsKey(tri.VertexC))
+            {
+                vertexIndices[tri.VertexC] = vertexIndices.Count;
+            }
+            
+            _triangleInts.Add(vertexIndices[tri.VertexA]);
+            _triangleInts.Add(vertexIndices[tri.VertexB]);
+            _triangleInts.Add(vertexIndices[tri.VertexC]);
         }
 
         Dictionary<Edge, int> processedEdgeIndices = new();
@@ -191,28 +189,6 @@ public class PlanetGenerator : MonoBehaviour
         mesh.triangles = _triangleInts.ToArray();
         mesh.RecalculateBounds();
         return;
-
-        void AddTriangle(Triangle tri)
-        {
-            if (!vertexIndices.ContainsKey(tri.VertexA))
-            {
-                vertexIndices[tri.VertexA] = vertexIndices.Count;
-            }
-            
-            if (!vertexIndices.ContainsKey(tri.VertexB))
-            {
-                vertexIndices[tri.VertexB] = vertexIndices.Count;
-            }
-            
-            if (!vertexIndices.ContainsKey(tri.VertexC))
-            {
-                vertexIndices[tri.VertexC] = vertexIndices.Count;
-            }
-            
-            _triangleInts.Add(vertexIndices[tri.VertexA]);
-            _triangleInts.Add(vertexIndices[tri.VertexB]);
-            _triangleInts.Add(vertexIndices[tri.VertexC]);
-        }
 
         void ProcessEdgePath(Edge edge, Edge startEdge, List<Vector2> edgePath, bool backwards = false, int depth = 1)
         {

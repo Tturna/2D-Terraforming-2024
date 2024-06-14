@@ -22,8 +22,7 @@ float noise_scale;
 float noise_offset_x;
 float noise_offset_y;
 
-AppendStructuredBuffer<mesh_triangle> inner_triangles;
-AppendStructuredBuffer<mesh_triangle> outer_triangles;
+AppendStructuredBuffer<mesh_triangle> triangles;
 AppendStructuredBuffer<mesh_edge> boundary_edges;
 
 /*
@@ -167,15 +166,10 @@ void cs_main (uint3 id : SV_DispatchThreadID)
         tri.vertex_a = cell_vertices[tris[i]];
         tri.vertex_b = cell_vertices[tris[i + 1]];
         tri.vertex_c = cell_vertices[tris[i + 2]];
+        triangles.Append(tri);
 
-        if (config == 0)
+        if (config != 0)
         {
-            inner_triangles.Append(tri);
-        }
-        else
-        {
-            outer_triangles.Append(tri);
-
             const int boundary_vertex_indices[4] = boundary_vertex_index_table[config - 1];
 
             for (int j = 0; j < 4; j += 2)
