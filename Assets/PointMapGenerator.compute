@@ -1,0 +1,51 @@
+#pragma kernel cs_main
+
+RWTexture2D<float> point_map;
+int res;
+float noise_scale;
+float noise_offset_x;
+float noise_offset_y;
+
+// Unity's noise functions ------------------------------------------------------------------------
+float2 unity_gradient_noise_dir(float2 p)
+{
+    p = p % 289;
+    float x = (34 * p.x + 1) * p.x % 289 + p.y;
+    x = (34 * x + 1) * x % 289;
+    x = frac(x / 41) * 2 - 1;
+    return normalize(float2(x - floor(x + 0.5), abs(x) - 0.5));
+}
+
+float unity_gradient_noise(float2 p)
+{
+    const float2 ip = floor(p);
+    float2 fp = frac(p);
+    const float d00 = dot(unity_gradient_noise_dir(ip), fp);
+    const float d01 = dot(unity_gradient_noise_dir(ip + float2(0, 1)), fp - float2(0, 1));
+    const float d10 = dot(unity_gradient_noise_dir(ip + float2(1, 0)), fp - float2(1, 0));
+    const float d11 = dot(unity_gradient_noise_dir(ip + float2(1, 1)), fp - float2(1, 1));
+    fp = fp * fp * fp * (fp * (fp * 6 - 15) + 10);
+    return lerp(lerp(d00, d01, fp.y), lerp(d10, d11, fp.y), fp.x);
+}
+
+float unity_gradient_noise_float(const float2 uv, const float scale)
+{
+    return unity_gradient_noise(uv * scale) + 0.5;
+}
+// Unity's noise functions ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  
+[numthreads(8,8,1)]
+void cs_main (uint3 id : SV_DispatchThreadID)
+{
+    const float2 noise_uv = float2(id.x + noise_offset_x, id.y + noise_offset_y) / res;
+    float noise = unity_gradient_noise_float(noise_uv, noise_scale);
+
+    const float2 uv = float2(id.x, id.y) / res;
+    const float radial_distance = length(uv - 0.5);
+    const float clamped_distance = clamp(radial_distance, 0.0, 0.5);
+    const float radial_falloff = 1.0 - clamped_distance * 2.0;
+
+    float ridgy_noise = abs(noise - 0.5);
+    
+    point_map[id.xy] = ridgy_noise * radial_falloff;
+}

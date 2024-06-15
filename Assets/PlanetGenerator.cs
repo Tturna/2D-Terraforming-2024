@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -19,6 +20,7 @@ public class PlanetGenerator : MonoBehaviour
     }
     
     [FormerlySerializedAs("planetGenCs")] public ComputeShader chunkGeneratorCs;
+    public ComputeShader pointMapGeneratorCs;
     public int resolution;
     [Range(0f, 1f)]
     public float isoValue;
@@ -36,19 +38,18 @@ public class PlanetGenerator : MonoBehaviour
     private ComputeBuffer _boundaryEdgeBuffer;
     private ComputeBuffer _boundaryEdgeCountBuffer;
 
+    public RenderTexture _planetPointMap;
+
     private void Start()
     {
-        _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
-        _boundaryEdgeBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 4, ComputeBufferType.Append);
-        _triangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-        _boundaryEdgeCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-        
-        chunkGeneratorCs.SetInt("res", resolution);
-        chunkGeneratorCs.SetInt("chunks_per_side", chunksPerAxis);
-        chunkGeneratorCs.SetBuffer(0, "triangles", _triangleBuffer);
-        chunkGeneratorCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
-        
+        InitializeData();
+        GeneratePointMap();
         GeneratePlanet();
+        
+        var pointMapVisualizer = new GameObject("Point Map Visualizer");
+        var rawImage = pointMapVisualizer.AddComponent<UnityEngine.UI.RawImage>();
+        rawImage.texture = _planetPointMap;
+        rawImage.rectTransform.sizeDelta = new Vector2(256, 256);
     }
 
     private void Update()
@@ -56,13 +57,50 @@ public class PlanetGenerator : MonoBehaviour
         // GeneratePlanet();
     }
 
+    private void OnRenderImage(RenderTexture source, RenderTexture destination)
+    {
+        Debug.Log("rendering...");
+        GeneratePointMap();
+        Graphics.Blit(_planetPointMap, destination);
+    }
+
+    private void InitializeData()
+    {
+        _planetPointMap = new RenderTexture(resolution, resolution, 0);
+        _planetPointMap.enableRandomWrite = true;
+        _planetPointMap.Create();
+        
+        pointMapGeneratorCs.SetTexture(0, "point_map", _planetPointMap);
+        
+        _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
+        _boundaryEdgeBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 4, ComputeBufferType.Append);
+        _triangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
+        _boundaryEdgeCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
+    }
+
+    private void GeneratePointMap()
+    {
+        pointMapGeneratorCs.SetInt("res", resolution);
+        pointMapGeneratorCs.SetFloat("noise_scale", noiseScale);
+        pointMapGeneratorCs.SetFloat("noise_offset_x", noiseOffset.x);
+        pointMapGeneratorCs.SetFloat("noise_offset_y", noiseOffset.y);
+        pointMapGeneratorCs.Dispatch(0, resolution / 8, resolution / 8, 1);
+    }
+
     private void GeneratePlanet()
     {
+        chunkGeneratorCs.SetInt("res", resolution);
+        chunkGeneratorCs.SetInt("chunks_per_side", chunksPerAxis);
         chunkGeneratorCs.SetFloat("iso_value", isoValue);
-        chunkGeneratorCs.SetFloat("noise_scale", noiseScale);
-        chunkGeneratorCs.SetFloat("noise_offset_x", noiseOffset.x);
-        chunkGeneratorCs.SetFloat("noise_offset_y", noiseOffset.y);
+        chunkGeneratorCs.SetBuffer(0, "triangles", _triangleBuffer);
+        chunkGeneratorCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
+        chunkGeneratorCs.SetTexture(0, "point_map", _planetPointMap);
+        
+        GenerateAllChunks();
+    }
 
+    private void GenerateAllChunks()
+    {
         for (var y = 0; y < chunksPerAxis; y++)
         {
             for (var x = 0; x < chunksPerAxis; x++)

@@ -132,7 +132,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 248944122}
-  - component: {fileID: 248944123}
   m_Layer: 0
   m_Name: Planet Generator
   m_TagString: Untagged
@@ -155,24 +154,6 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &248944123
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 248944120}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 63b0a41e9683c4f4e82482850f7efc79, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  planetGenCs: {fileID: 7200000, guid: 67355c2569bf425abdb39eb857f49d40, type: 3}
-  resolution: 256
-  isoValue: 0.56
-  chunksPerAxis: 4
-  noiseScale: 5
-  noiseOffset: {x: 0, y: 0}
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -184,6 +165,7 @@ GameObject:
   - component: {fileID: 519420032}
   - component: {fileID: 519420031}
   - component: {fileID: 519420029}
+  - component: {fileID: 519420033}
   m_Layer: 0
   m_Name: Main Cam
   m_TagString: MainCamera
@@ -257,6 +239,26 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &519420033
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519420028}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63b0a41e9683c4f4e82482850f7efc79, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  chunkGeneratorCs: {fileID: 7200000, guid: 67355c2569bf425abdb39eb857f49d40, type: 3}
+  pointMapGeneratorCs: {fileID: 7200000, guid: b5f222cb9a482da4c9236f6bd953abb8, type: 3}
+  resolution: 256
+  isoValue: 0.852
+  chunksPerAxis: 4
+  noiseScale: 16
+  noiseOffset: {x: 0, y: 0}
+  _planetPointMap: {fileID: 0}
 --- !u!1 &1143648431
 GameObject:
   m_ObjectHideFlags: 0
