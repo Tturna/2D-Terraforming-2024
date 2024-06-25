@@ -1,8 +1,9 @@
-using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Debug = UnityEngine.Debug;
 
 public class PlanetGenerator : MonoBehaviour
 {
@@ -29,6 +30,15 @@ public class PlanetGenerator : MonoBehaviour
     [Header("Noise")]
     public float noiseScale;
     public Vector2 noiseOffset;
+    public int noiseOctaves;
+    [Range(0f, 1f)]
+    public float noiseLacunarity;
+    [Range(0, 10)]
+    public int noisePower;
+    [Range(-1f, 1f)]
+    public float noiseValueCurveOffset;
+    [Range(0f, 1f)]
+    public float noiseRadialFalloffValue;
     
     private readonly List<int> _triangleInts = new();
     private MeshFilter _meshFilter;
@@ -59,7 +69,7 @@ public class PlanetGenerator : MonoBehaviour
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
-        Debug.Log("rendering...");
+        // Debug.Log("rendering...");
         GeneratePointMap();
         Graphics.Blit(_planetPointMap, destination);
     }
@@ -84,6 +94,11 @@ public class PlanetGenerator : MonoBehaviour
         pointMapGeneratorCs.SetFloat("noise_scale", noiseScale);
         pointMapGeneratorCs.SetFloat("noise_offset_x", noiseOffset.x);
         pointMapGeneratorCs.SetFloat("noise_offset_y", noiseOffset.y);
+        pointMapGeneratorCs.SetInt("noise_octaves", noiseOctaves);
+        pointMapGeneratorCs.SetFloat("noise_lacunarity", noiseLacunarity);
+        pointMapGeneratorCs.SetInt("noise_power", noisePower);
+        pointMapGeneratorCs.SetFloat("noise_value_curve_offset", noiseValueCurveOffset);
+        pointMapGeneratorCs.SetFloat("noise_radial_falloff_value", noiseRadialFalloffValue);
         pointMapGeneratorCs.Dispatch(0, resolution / 8, resolution / 8, 1);
     }
 
@@ -105,9 +120,6 @@ public class PlanetGenerator : MonoBehaviour
         {
             for (var x = 0; x < chunksPerAxis; x++)
             {
-                // debug
-                // if (x != 0 || y != 0) continue;
-                
                 Debug.Log($"Generating chunk {x}, {y}");
                 GenerateChunk(x, y);
             }
@@ -130,7 +142,6 @@ public class PlanetGenerator : MonoBehaviour
         // planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
         chunkGeneratorCs.Dispatch(0, 4, 4, 1);
         
-        var innerTriangleCount = new int[1];
         var outerTriangleCount = new int[1];
         var boundaryEdgeCount = new int[1];
         
@@ -151,9 +162,6 @@ public class PlanetGenerator : MonoBehaviour
 
         _triangleInts.Clear();
 
-        // Uncomment this to only draw the outer triangles for debugging/funsies.
-        // innerTriangles = Array.Empty<Triangle>();
-        
         // Because each cell is generated in parallel, every vertex has at least one duplicate.
         // We use a dictionary to keep track of the unique vertices and their indices to ignore duplicates.
         Dictionary<Vector3, int> vertexIndices = new();
@@ -180,42 +188,43 @@ public class PlanetGenerator : MonoBehaviour
             _triangleInts.Add(vertexIndices[tri.VertexC]);
         }
 
+        var go = new GameObject($"Chunk ({x}, {y})");
+
         Dictionary<Edge, int> processedEdgeIndices = new();
         List<List<Vector2>> edgePaths = new();
 
         for (var ei = 0; ei < boundaryEdges.Length; ei++)
         {
             var edge = boundaryEdges[ei];
+            
             if (processedEdgeIndices.ContainsKey(edge)) continue;
         
-            var edgeLoop = new List<Vector2> { edge.VertexA };
+            var edgeLoop = new List<Vector2> { edge.VertexA, edge.VertexB };
             ProcessEdgePath(edge, edge, edgeLoop);
         
-            if (edgeLoop.Count < 2) continue;
+            if (edgeLoop.Count <= 2) continue;
         
             edgePaths.Add(edgeLoop);
         }
         
-        Debug.Log($"Edge loops: {edgePaths.Count}");
-
-        var go = new GameObject($"Chunk ({x}, {y})");
-
         for (var ei = 0; ei < edgePaths.Count; ei++)
         {
-            var edgeLoop = edgePaths[ei];
+            var edgeVertices = edgePaths[ei];
             // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
             
-            // for (var i = 0; i < edgeLoop.Count - 1; i++)
+            // for (var i = 0; i < edgeVertices.Count - 1; i++)
             // {
-            //     var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, i / (float)edgeLoop.Count, 1);
-            //     var a = edgeLoop[i];
-            //     var b = edgeLoop[(i + 1) % edgeLoop.Count];
+            //     var color = Color.HSVToRGB(ei / (float)edgePaths.Count, i / (float)edgeVertices.Count / 1.2f, 1);
+            //     var a = edgeVertices[i];
+            //     var b = edgeVertices[(i + 1) % edgeVertices.Count];
             //     Debug.DrawLine(a, b, color, 300);
             // }
 
             var edgeCollider = go.AddComponent<EdgeCollider2D>();
-            edgeCollider.points = edgeLoop.ToArray();
+            edgeCollider.points = edgeVertices.ToArray();
         }
+        
+        Debug.Log($"Edge loops: {edgePaths.Count}");
 
         var mesh = new Mesh();
         // mesh.indexFormat = IndexFormat.UInt32;
@@ -226,6 +235,7 @@ public class PlanetGenerator : MonoBehaviour
         mesh.vertices = vertexIndices.Keys.ToArray();
         mesh.triangles = _triangleInts.ToArray();
         mesh.RecalculateBounds();
+        
         return;
 
         void ProcessEdgePath(Edge edge, Edge startEdge, List<Vector2> edgePath, bool backwards = false, int depth = 1)
@@ -250,7 +260,7 @@ public class PlanetGenerator : MonoBehaviour
                 return;
             }
             
-            var processingFurther = false;
+            var nextEdgeFound = false;
 
             // recursively find the next edge in the path
             foreach (var otherEdge in boundaryEdges)
@@ -259,30 +269,46 @@ public class PlanetGenerator : MonoBehaviour
                 
                 if (edge.VertexA == otherEdge.VertexA) continue;
 
+                // check if the edge is to the relative LEFT of the current edge
                 if (depth == 1 || backwards)
                 {
                     if (edge.VertexA == otherEdge.VertexB)
                     {
                         processedEdgeIndices[otherEdge] = 0;
-                        edgePath.Insert(0, edge.VertexA);
+
+                        // skip inserting vertices of the first edge because they're already in the list
+                        if (depth != 1)
+                        {
+                            edgePath.Insert(0, edge.VertexA);
+                        }
+                        
                         ProcessEdgePath(otherEdge, startEdge, edgePath, true, depth + 1);
-                        processingFurther = true;
-                        continue;
+                        nextEdgeFound = true;
+                        
+                        if (depth == 1) continue;
+                        return;
                     }
                 }
                 
+                // check if the edge is to the relative RIGHT of the current edge
                 if (edge.VertexB == otherEdge.VertexA)
                 {
                     processedEdgeIndices[otherEdge] = 0;
-                    edgePath.Add(edge.VertexB);
+                    
+                    // skip inserting vertices of the first edge because they're already in the list
+                    if (depth != 1)
+                    {
+                        edgePath.Add(edge.VertexB);
+                    }
+                    
                     ProcessEdgePath(otherEdge, startEdge, edgePath, false, depth + 1);
-                    processingFurther = true;
+                    nextEdgeFound = true;
                 }
             }
             
-            if (processingFurther) return;
+            if (nextEdgeFound) return;
             
-            // final edge vertex in a non-closed path
+            // final edge vertex in a non-looping path
             if (backwards)
             {
                 edgePath.Insert(0, edge.VertexA);

@@ -254,10 +254,15 @@ MonoBehaviour:
   chunkGeneratorCs: {fileID: 7200000, guid: 67355c2569bf425abdb39eb857f49d40, type: 3}
   pointMapGeneratorCs: {fileID: 7200000, guid: b5f222cb9a482da4c9236f6bd953abb8, type: 3}
   resolution: 256
-  isoValue: 0.852
+  isoValue: 0.644
   chunksPerAxis: 4
   noiseScale: 16
   noiseOffset: {x: 0, y: 0}
+  noiseOctaves: 2
+  noiseLacunarity: 0.1
+  noisePower: 0
+  noiseValueCurveOffset: 0.16
+  noiseRadialFalloffValue: 0.8
   _planetPointMap: {fileID: 0}
 --- !u!1 &1143648431
 GameObject:

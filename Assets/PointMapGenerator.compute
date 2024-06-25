@@ -5,6 +5,11 @@ int res;
 float noise_scale;
 float noise_offset_x;
 float noise_offset_y;
+int noise_octaves;
+float noise_lacunarity;
+int noise_power;
+float noise_value_curve_offset;
+float noise_radial_falloff_value;
 
 // Unity's noise functions ------------------------------------------------------------------------
 float2 unity_gradient_noise_dir(float2 p)
@@ -43,9 +48,37 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     const float2 uv = float2(id.x, id.y) / res;
     const float radial_distance = length(uv - 0.5);
     const float clamped_distance = clamp(radial_distance, 0.0, 0.5);
-    const float radial_falloff = 1.0 - clamped_distance * 2.0;
-
-    float ridgy_noise = abs(noise - 0.5);
+    float radial_falloff = clamped_distance * 2.0;
     
-    point_map[id.xy] = ridgy_noise * radial_falloff;
+    // float ridgy_noise = abs(noise - 0.5);
+    // float noise_pow4 = noise * noise * noise * noise;
+
+    for (int i = 1; i <= noise_octaves; i++)
+    {
+        const float noise_detail = unity_gradient_noise_float(noise_uv, noise_scale * pow(2, i));
+        noise += noise_detail * pow(noise_lacunarity, i);
+    }
+
+    // noise = pow(noise, noise_power);
+    // noise = noise * noise * noise * noise;
+
+    const float noise_og = noise;
+    for (int i = 0; i < noise_power; i++)
+    {
+        noise *= noise_og;
+    }
+
+    // ease in/out cubic
+    noise = noise < 0.5 - noise_value_curve_offset
+    ? 4 * pow(noise + noise_value_curve_offset, 3)
+    : 1 - pow(-2 * (noise + noise_value_curve_offset) + 2, 3) / 2;
+
+    radial_falloff = lerp(1.0, radial_falloff, noise_radial_falloff_value);
+
+    if (radial_distance > 0.5)
+    {
+        radial_falloff = 0.0;
+    }
+    
+    point_map[id.xy] = noise * radial_falloff;
 }
