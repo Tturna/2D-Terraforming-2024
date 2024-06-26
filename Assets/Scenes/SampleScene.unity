@@ -263,6 +263,7 @@ MonoBehaviour:
   noisePower: 0
   noiseValueCurveOffset: 0.16
   noiseRadialFalloffValue: 0.8
+  noiseOutwardFadeStartMultiplier: 8
   _planetPointMap: {fileID: 0}
 --- !u!1 &1143648431
 GameObject:

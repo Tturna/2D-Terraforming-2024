@@ -10,6 +10,7 @@ float noise_lacunarity;
 int noise_power;
 float noise_value_curve_offset;
 float noise_radial_falloff_value;
+float noise_outward_fade_start_multiplier;
 
 // Unity's noise functions ------------------------------------------------------------------------
 float2 unity_gradient_noise_dir(float2 p)
@@ -48,7 +49,7 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     const float2 uv = float2(id.x, id.y) / res;
     const float radial_distance = length(uv - 0.5);
     const float clamped_distance = clamp(radial_distance, 0.0, 0.5);
-    float radial_falloff = clamped_distance * 2.0;
+    float reverse_radial_falloff = clamped_distance * 2.0;
     
     // float ridgy_noise = abs(noise - 0.5);
     // float noise_pow4 = noise * noise * noise * noise;
@@ -58,9 +59,6 @@ void cs_main (uint3 id : SV_DispatchThreadID)
         const float noise_detail = unity_gradient_noise_float(noise_uv, noise_scale * pow(2, i));
         noise += noise_detail * pow(noise_lacunarity, i);
     }
-
-    // noise = pow(noise, noise_power);
-    // noise = noise * noise * noise * noise;
 
     const float noise_og = noise;
     for (int i = 0; i < noise_power; i++)
@@ -73,12 +71,16 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     ? 4 * pow(noise + noise_value_curve_offset, 3)
     : 1 - pow(-2 * (noise + noise_value_curve_offset) + 2, 3) / 2;
 
-    radial_falloff = lerp(1.0, radial_falloff, noise_radial_falloff_value);
+    reverse_radial_falloff = lerp(1.0, reverse_radial_falloff, noise_radial_falloff_value);
 
     if (radial_distance > 0.5)
     {
-        radial_falloff = 0.0;
+        reverse_radial_falloff = 0.0;
     }
+
+    // fade out noise towards the edges to prevent jagged terrain edges
+    const float radial_falloff = 1.0 - reverse_radial_falloff;
+    const float outer_falloff = clamp(radial_falloff * noise_outward_fade_start_multiplier, 0.0, 1.0);
     
-    point_map[id.xy] = noise * radial_falloff;
+    point_map[id.xy] = noise * reverse_radial_falloff * outer_falloff;
 }

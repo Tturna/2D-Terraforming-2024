@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -39,6 +38,8 @@ public class PlanetGenerator : MonoBehaviour
     public float noiseValueCurveOffset;
     [Range(0f, 1f)]
     public float noiseRadialFalloffValue;
+    [Range(1f, 10f)]
+    public float noiseOutwardFadeStartMultiplier;
     
     private readonly List<int> _triangleInts = new();
     private MeshFilter _meshFilter;
@@ -99,6 +100,7 @@ public class PlanetGenerator : MonoBehaviour
         pointMapGeneratorCs.SetInt("noise_power", noisePower);
         pointMapGeneratorCs.SetFloat("noise_value_curve_offset", noiseValueCurveOffset);
         pointMapGeneratorCs.SetFloat("noise_radial_falloff_value", noiseRadialFalloffValue);
+        pointMapGeneratorCs.SetFloat("noise_outward_fade_start_multiplier", noiseOutwardFadeStartMultiplier);
         pointMapGeneratorCs.Dispatch(0, resolution / 8, resolution / 8, 1);
     }
 
@@ -120,7 +122,7 @@ public class PlanetGenerator : MonoBehaviour
         {
             for (var x = 0; x < chunksPerAxis; x++)
             {
-                Debug.Log($"Generating chunk {x}, {y}");
+                // Debug.Log($"Generating chunk {x}, {y}");
                 GenerateChunk(x, y);
             }
         }
@@ -224,7 +226,7 @@ public class PlanetGenerator : MonoBehaviour
             edgeCollider.points = edgeVertices.ToArray();
         }
         
-        Debug.Log($"Edge loops: {edgePaths.Count}");
+        // Debug.Log($"Edge loops: {edgePaths.Count}");
 
         var mesh = new Mesh();
         // mesh.indexFormat = IndexFormat.UInt32;
