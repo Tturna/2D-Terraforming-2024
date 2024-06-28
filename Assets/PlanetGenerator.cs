@@ -19,6 +19,12 @@ public class PlanetGenerator : MonoBehaviour
         public Vector2 VertexA;
         public Vector2 VertexB;
     }
+
+    private struct Chunk
+    {
+        public GameObject GameObject;
+        public Mesh Mesh;
+    }
     
     [FormerlySerializedAs("planetGenCs")] public ComputeShader chunkGeneratorCs;
     public ComputeShader pointMapGeneratorCs;
@@ -28,6 +34,8 @@ public class PlanetGenerator : MonoBehaviour
     public float isoValue;
     public int chunksPerAxis;
     public Material meshMaterial;
+    [Range(0.02f, 1f)]
+    public float brushStrength;
 
     [Header("Noise")]
     public float noiseScale;
@@ -51,6 +59,9 @@ public class PlanetGenerator : MonoBehaviour
     private ComputeBuffer _triangleCountBuffer;
     private ComputeBuffer _boundaryEdgeBuffer;
     private ComputeBuffer _boundaryEdgeCountBuffer;
+    private bool _buffersInitialized;
+    private float _bufferReleaseTimer;
+    private const float BufferReleaseTimeout = 3f;
 
     // Because each cell is generated in parallel, every vertex has at least one duplicate.
     // We use a dictionary to keep track of the unique vertices and their indices to ignore duplicates.
@@ -60,14 +71,18 @@ public class PlanetGenerator : MonoBehaviour
     private readonly int[] _triangleCount = new int[1];
     private readonly int[] _boundaryEdgeCount = new int[1];
         
-
-    public RenderTexture _planetPointMap;
+    private Chunk[] _chunks;
+    private RenderTexture _planetPointMap;
 
     private void Start()
     {
+        var sw = new Stopwatch();
+        sw.Start();
         InitializeData();
         GeneratePointMap();
-        // GeneratePlanet();
+        sw.Stop();
+        Debug.Log($"Initialization took {sw.ElapsedMilliseconds}ms");
+        GeneratePlanet();
         
         // var pointMapVisualizer = new GameObject("Point Map Visualizer");
         // var rawImage = pointMapVisualizer.AddComponent<UnityEngine.UI.RawImage>();
@@ -78,17 +93,53 @@ public class PlanetGenerator : MonoBehaviour
     private void Update()
     {
         // GeneratePlanet();
+
+        if (_buffersInitialized)
+        {
+            _bufferReleaseTimer += Time.deltaTime;
+            if (_bufferReleaseTimer >= BufferReleaseTimeout)
+            {
+                ReleaseBuffers();
+                _bufferReleaseTimer = 0;
+            }
+        }
+
+        if (Input.GetMouseButton(0))
+        {
+            var mouseWorldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+            var localBrushPosition = mouseWorldPos - transform.position;
+            
+            if (localBrushPosition.x < 0 || localBrushPosition.x >= resolution ||
+                localBrushPosition.y < 0 || localBrushPosition.y >= resolution)
+            {
+                return;
+            }
+            
+            Terraform(localBrushPosition, 1f, -brushStrength);
+        }
+        else if (Input.GetMouseButton(1))
+        {
+            var mouseWorldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+            var localBrushPosition = mouseWorldPos - transform.position;
+
+            if (localBrushPosition.x >= 0 && localBrushPosition.x < resolution
+                && localBrushPosition.y >= 0 && localBrushPosition.y < resolution)
+            {
+                Terraform(localBrushPosition, 1f, brushStrength);
+            }
+        }
     }
 
-    private void OnRenderImage(RenderTexture source, RenderTexture destination)
-    {
-        // Debug.Log("rendering...");
-        GeneratePointMap();
-        Graphics.Blit(_planetPointMap, destination);
-    }
+    // private void OnRenderImage(RenderTexture source, RenderTexture destination)
+    // {
+    //     // Debug.Log("rendering...");
+    //     GeneratePointMap();
+    //     Graphics.Blit(_planetPointMap, destination);
+    // }
 
     private void InitializeData()
     {
+        // ReSharper disable once UseObjectOrCollectionInitializer
         _planetPointMap = new RenderTexture(resolution, resolution, 0);
         _planetPointMap.enableRandomWrite = true;
         _planetPointMap.Create();
@@ -98,10 +149,46 @@ public class PlanetGenerator : MonoBehaviour
         terraformerCs.SetInt("res", resolution);
         terraformerCs.SetTexture(0, "point_map", _planetPointMap);
         
+        InitializeBuffers();
+        
+        _chunks = new Chunk[chunksPerAxis * chunksPerAxis];
+
+        for (var i = 0; i < _chunks.Length; i++)
+        {
+            var x = i % chunksPerAxis;
+            var y = i / chunksPerAxis;
+            var go = new GameObject($"Chunk ({x}, {y})");
+            var mesh = new Mesh();
+            // mesh.indexFormat = IndexFormat.UInt32;
+            
+            go.AddComponent<MeshFilter>().mesh = mesh;
+            go.AddComponent<MeshRenderer>().material = meshMaterial;
+            
+            _chunks[i].GameObject = go;
+            _chunks[i].Mesh = mesh;
+        }
+    }
+
+    private void InitializeBuffers()
+    {
         _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
         _boundaryEdgeBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 4, ComputeBufferType.Append);
         _triangleCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
         _boundaryEdgeCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
+        _buffersInitialized = true;
+        _bufferReleaseTimer = 0;
+        
+        chunkGeneratorCs.SetBuffer(0, "triangles", _triangleBuffer);
+        chunkGeneratorCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
+    }
+
+    private void ReleaseBuffers()
+    {
+        _triangleBuffer.Release();
+        _boundaryEdgeBuffer.Release();
+        _triangleCountBuffer.Release();
+        _boundaryEdgeCountBuffer.Release();
+        _buffersInitialized = false;
     }
 
     private void GeneratePointMap()
@@ -123,11 +210,13 @@ public class PlanetGenerator : MonoBehaviour
         chunkGeneratorCs.SetInt("res", resolution);
         chunkGeneratorCs.SetInt("chunks_per_side", chunksPerAxis);
         chunkGeneratorCs.SetFloat("iso_value", isoValue);
-        chunkGeneratorCs.SetBuffer(0, "triangles", _triangleBuffer);
-        chunkGeneratorCs.SetBuffer(0, "boundary_edges", _boundaryEdgeBuffer);
         chunkGeneratorCs.SetTexture(0, "point_map", _planetPointMap);
-        
+
+        var sw = new Stopwatch();
+        sw.Start();
         GenerateAllChunks();
+        sw.Stop();
+        Debug.Log($"Total chunk generation took {sw.ElapsedMilliseconds}ms");
     }
 
     private void GenerateAllChunks()
@@ -137,18 +226,17 @@ public class PlanetGenerator : MonoBehaviour
             for (var x = 0; x < chunksPerAxis; x++)
             {
                 // Debug.Log($"Generating chunk {x}, {y}");
-                GenerateChunk(x, y);
+                ProcessChunk(x, y);
             }
         }
         
-        _triangleBuffer.Release();
-        _triangleCountBuffer.Release();
-        _boundaryEdgeBuffer.Release();
-        _boundaryEdgeCountBuffer.Release();
+        ReleaseBuffers();
     }
 
-    private void GenerateChunk(int x, int y)
+    private void ProcessChunk(int x, int y)
     {
+        var chunk = _chunks[y * chunksPerAxis + x];
+        
         chunkGeneratorCs.SetInt("chunk_x", x);
         chunkGeneratorCs.SetInt("chunk_y", y);
         
@@ -172,8 +260,6 @@ public class PlanetGenerator : MonoBehaviour
         
         _triangleBuffer.GetData(triangles, 0, 0, _triangleCount[0]);
         _boundaryEdgeBuffer.GetData(boundaryEdges, 0, 0, _boundaryEdgeCount[0]);
-
-        var go = new GameObject($"Chunk ({x}, {y})");
 
         _processedEdgeIndices.Clear();
         _edgePaths.Clear();
@@ -201,47 +287,53 @@ public class PlanetGenerator : MonoBehaviour
             _triangleInts.Add(_uniqueVertexIndices[tri.VertexB]);
             _triangleInts.Add(_uniqueVertexIndices[tri.VertexC]);
         }
-
-        var mesh = new Mesh();
-        // mesh.indexFormat = IndexFormat.UInt32;
         
-        go.AddComponent<MeshFilter>().mesh = mesh;
-        go.AddComponent<MeshRenderer>().material = meshMaterial;
-        
+        var go = chunk.GameObject;
+        var mesh = chunk.Mesh;
+        mesh.Clear();
         mesh.vertices = _uniqueVertexIndices.Keys.ToArray();
         mesh.triangles = _triangleInts.ToArray();
         mesh.RecalculateBounds();
+        chunk.Mesh = mesh;
         
-        for (var ei = 0; ei < boundaryEdges.Length; ei++)
-        {
-            var edge = boundaryEdges[ei];
-            
-            if (_processedEdgeIndices.ContainsKey(edge)) continue;
-        
-            var edgeLoop = new List<Vector2> {edge.VertexA, edge.VertexB};
-            ProcessEdgePath(edge, edge, edgeLoop);
-        
-            if (edgeLoop.Count <= 2) continue;
-        
-            _edgePaths.Add(edgeLoop);
-        }
-        
-        for (var ei = 0; ei < _edgePaths.Count; ei++)
-        {
-            var edgeVertices = _edgePaths[ei];
-            // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
-            
-            // for (var i = 0; i < edgeVertices.Count - 1; i++)
-            // {
-            //     var color = Color.HSVToRGB(ei / (float)edgePaths.Count, i / (float)edgeVertices.Count / 1.2f, 1);
-            //     var a = edgeVertices[i];
-            //     var b = edgeVertices[(i + 1) % edgeVertices.Count];
-            //     Debug.DrawLine(a, b, color, 300);
-            // }
-
-            var edgeCollider = go.AddComponent<EdgeCollider2D>();
-            edgeCollider.points = edgeVertices.ToArray();
-        }
+        // for (var ei = 0; ei < boundaryEdges.Length; ei++)
+        // {
+        //     var edge = boundaryEdges[ei];
+        //     
+        //     if (_processedEdgeIndices.ContainsKey(edge)) continue;
+        //
+        //     var edgeLoop = new List<Vector2> { edge.VertexA, edge.VertexB };
+        //     ProcessEdgePath(edge, edge, edgeLoop);
+        //
+        //     if (edgeLoop.Count <= 2) continue;
+        //
+        //     _edgePaths.Add(edgeLoop);
+        // }
+        //
+        // // TODO: figure out a better system for updating edge colliders.
+        // // Preferably, we should only update the edge colliders that have changed.
+        // var existingEdgeColliders = go.GetComponents<EdgeCollider2D>();
+        // for (var i = 0; i < existingEdgeColliders.Length; i++)
+        // {
+        //     Destroy(existingEdgeColliders[i]);
+        // }
+        //
+        // for (var ei = 0; ei < _edgePaths.Count; ei++)
+        // {
+        //     var edgeVertices = _edgePaths[ei];
+        //     // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
+        //     
+        //     // for (var i = 0; i < edgeVertices.Count - 1; i++)
+        //     // {
+        //     //     var color = Color.HSVToRGB(ei / (float)edgePaths.Count, i / (float)edgeVertices.Count / 1.2f, 1);
+        //     //     var a = edgeVertices[i];
+        //     //     var b = edgeVertices[(i + 1) % edgeVertices.Count];
+        //     //     Debug.DrawLine(a, b, color, 300);
+        //     // }
+        //
+        //     var edgeCollider = go.AddComponent<EdgeCollider2D>();
+        //     edgeCollider.points = edgeVertices.ToArray();
+        // }
         
         // Debug.Log($"Edge loops: {edgePaths.Count}");
 
@@ -338,7 +430,25 @@ public class PlanetGenerator : MonoBehaviour
         terraformerCs.SetFloat("brush_y", localBrushPosition.y);
         terraformerCs.SetFloat("brush_size", brushSize);
         terraformerCs.SetFloat("brush_strength", brushStrength);
+        terraformerCs.SetFloat("brush_smoothing", 0.2f);
         terraformerCs.Dispatch(0, resolution / 8, resolution / 8, 1);
+
+        if (_buffersInitialized)
+        {
+            _bufferReleaseTimer = 0;
+        }
+        else
+        {
+            InitializeBuffers();
+        }
+        
+        var chunkX = (int)(localBrushPosition.x / resolution * chunksPerAxis);
+        var chunkY = (int)(localBrushPosition.y / resolution * chunksPerAxis);
+        var sw = new Stopwatch();
+        sw.Start();
+        ProcessChunk(chunkX, chunkY);
+        sw.Stop();
+        Debug.Log($"Chunk update took {sw.ElapsedMilliseconds}ms");
     }
 
     // private void OnDrawGizmos()

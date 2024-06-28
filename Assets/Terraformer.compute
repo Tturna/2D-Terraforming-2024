@@ -6,18 +6,19 @@ half brush_x;
 half brush_y;
 half brush_size;
 half brush_strength;
+half brush_smoothing;
 
 [numthreads(8,8,1)]
 void cs_main (uint3 id : SV_DispatchThreadID)
 {
-    half2 brush_uv = half2(brush_x, brush_y) / res;
-    half2 uv = half2(id.x, id.y) / res;
-    half unit_brush_size = brush_size / res;
+    const half2 brush_uv = half2(brush_x, brush_y) / res;
+    const half2 uv = half2(id.x, id.y) / res;
+    const half unit_brush_size = brush_size / res;
 
-    half dist = distance(brush_uv, uv);
-    half brush_limiter = 1.0 - saturate(dist / unit_brush_size);
-    half strength = brush_strength * brush_limiter;
+    const half dist = distance(brush_uv, uv);
+    const half brush_limiter = 1.0 - saturate(dist / unit_brush_size);
+    const half strength = brush_strength * brush_limiter;
 
-    float p = point_map[id.xy];
-    point_map[id.xy] = lerp(p, clamp(p + strength, 0.0, 1.0), strength);
+    const half point_value = point_map[id.xy];
+    point_map[id.xy] = lerp(point_value, clamp(point_value + strength, 0.0, 1.0), brush_smoothing);
 }
