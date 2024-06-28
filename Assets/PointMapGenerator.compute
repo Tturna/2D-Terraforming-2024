@@ -57,11 +57,12 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     for (int i = 1; i <= noise_octaves; i++)
     {
         const float noise_detail = unity_gradient_noise_float(noise_uv, noise_scale * pow(2, i));
-        noise += noise_detail * pow(noise_lacunarity, i);
+        // abs is used to suppress a warning about negative values
+        noise += noise_detail * pow(abs(noise_lacunarity), i);
     }
 
     const float noise_og = noise;
-    for (int i = 0; i < noise_power; i++)
+    for (int j = 0; j < noise_power; j++)
     {
         noise *= noise_og;
     }

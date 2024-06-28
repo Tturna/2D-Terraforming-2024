@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Serialization;
+using System.Diagnostics;
 using Debug = UnityEngine.Debug;
 
 public class PlanetGenerator : MonoBehaviour
@@ -21,10 +22,12 @@ public class PlanetGenerator : MonoBehaviour
     
     [FormerlySerializedAs("planetGenCs")] public ComputeShader chunkGeneratorCs;
     public ComputeShader pointMapGeneratorCs;
+    public ComputeShader terraformerCs;
     public int resolution;
     [Range(0f, 1f)]
     public float isoValue;
     public int chunksPerAxis;
+    public Material meshMaterial;
 
     [Header("Noise")]
     public float noiseScale;
@@ -49,18 +52,27 @@ public class PlanetGenerator : MonoBehaviour
     private ComputeBuffer _boundaryEdgeBuffer;
     private ComputeBuffer _boundaryEdgeCountBuffer;
 
+    // Because each cell is generated in parallel, every vertex has at least one duplicate.
+    // We use a dictionary to keep track of the unique vertices and their indices to ignore duplicates.
+    private readonly Dictionary<Vector3, int> _uniqueVertexIndices = new();
+    private readonly Dictionary<Edge, int> _processedEdgeIndices = new();
+    private readonly List<List<Vector2>> _edgePaths = new();
+    private readonly int[] _triangleCount = new int[1];
+    private readonly int[] _boundaryEdgeCount = new int[1];
+        
+
     public RenderTexture _planetPointMap;
 
     private void Start()
     {
         InitializeData();
         GeneratePointMap();
-        GeneratePlanet();
+        // GeneratePlanet();
         
-        var pointMapVisualizer = new GameObject("Point Map Visualizer");
-        var rawImage = pointMapVisualizer.AddComponent<UnityEngine.UI.RawImage>();
-        rawImage.texture = _planetPointMap;
-        rawImage.rectTransform.sizeDelta = new Vector2(256, 256);
+        // var pointMapVisualizer = new GameObject("Point Map Visualizer");
+        // var rawImage = pointMapVisualizer.AddComponent<UnityEngine.UI.RawImage>();
+        // rawImage.texture = _planetPointMap;
+        // rawImage.rectTransform.sizeDelta = new Vector2(256, 256);
     }
 
     private void Update()
@@ -81,7 +93,10 @@ public class PlanetGenerator : MonoBehaviour
         _planetPointMap.enableRandomWrite = true;
         _planetPointMap.Create();
         
+        pointMapGeneratorCs.SetInt("res", resolution);
         pointMapGeneratorCs.SetTexture(0, "point_map", _planetPointMap);
+        terraformerCs.SetInt("res", resolution);
+        terraformerCs.SetTexture(0, "point_map", _planetPointMap);
         
         _triangleBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 6, ComputeBufferType.Append);
         _boundaryEdgeBuffer = new ComputeBuffer((resolution / chunksPerAxis - 1) * (resolution / chunksPerAxis - 1) * 4, sizeof(float) * 4, ComputeBufferType.Append);
@@ -91,7 +106,6 @@ public class PlanetGenerator : MonoBehaviour
 
     private void GeneratePointMap()
     {
-        pointMapGeneratorCs.SetInt("res", resolution);
         pointMapGeneratorCs.SetFloat("noise_scale", noiseScale);
         pointMapGeneratorCs.SetFloat("noise_offset_x", noiseOffset.x);
         pointMapGeneratorCs.SetFloat("noise_offset_y", noiseOffset.y);
@@ -104,7 +118,7 @@ public class PlanetGenerator : MonoBehaviour
         pointMapGeneratorCs.Dispatch(0, resolution / 8, resolution / 8, 1);
     }
 
-    private void GeneratePlanet()
+    public void GeneratePlanet()
     {
         chunkGeneratorCs.SetInt("res", resolution);
         chunkGeneratorCs.SetInt("chunks_per_side", chunksPerAxis);
@@ -144,74 +158,77 @@ public class PlanetGenerator : MonoBehaviour
         // planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
         chunkGeneratorCs.Dispatch(0, 4, 4, 1);
         
-        var outerTriangleCount = new int[1];
-        var boundaryEdgeCount = new int[1];
-        
-        _triangleCountBuffer.SetData(outerTriangleCount);
-        _boundaryEdgeCountBuffer.SetData(boundaryEdgeCount);
+        _triangleCountBuffer.SetData(_triangleCount);
+        _boundaryEdgeCountBuffer.SetData(_boundaryEdgeCount);
         
         ComputeBuffer.CopyCount(_triangleBuffer, _triangleCountBuffer, 0);
         ComputeBuffer.CopyCount(_boundaryEdgeBuffer, _boundaryEdgeCountBuffer, 0);
         
-        _triangleCountBuffer.GetData(outerTriangleCount, 0, 0, 1);
-        _boundaryEdgeCountBuffer.GetData(boundaryEdgeCount, 0, 0, 1);
+        _triangleCountBuffer.GetData(_triangleCount, 0, 0, 1);
+        _boundaryEdgeCountBuffer.GetData(_boundaryEdgeCount, 0, 0, 1);
         
-        var triangles = new Triangle[outerTriangleCount[0]];
-        var boundaryEdges = new Edge[boundaryEdgeCount[0]];
+        var triangles = new Triangle[_triangleCount[0]];
+        var boundaryEdges = new Edge[_boundaryEdgeCount[0]];
         
-        _triangleBuffer.GetData(triangles, 0, 0, outerTriangleCount[0]);
-        _boundaryEdgeBuffer.GetData(boundaryEdges, 0, 0, boundaryEdgeCount[0]);
-
-        _triangleInts.Clear();
-
-        // Because each cell is generated in parallel, every vertex has at least one duplicate.
-        // We use a dictionary to keep track of the unique vertices and their indices to ignore duplicates.
-        Dictionary<Vector3, int> vertexIndices = new();
-
-        foreach (var tri in triangles)
-        {
-            if (!vertexIndices.ContainsKey(tri.VertexA))
-            {
-                vertexIndices[tri.VertexA] = vertexIndices.Count;
-            }
-            
-            if (!vertexIndices.ContainsKey(tri.VertexB))
-            {
-                vertexIndices[tri.VertexB] = vertexIndices.Count;
-            }
-            
-            if (!vertexIndices.ContainsKey(tri.VertexC))
-            {
-                vertexIndices[tri.VertexC] = vertexIndices.Count;
-            }
-            
-            _triangleInts.Add(vertexIndices[tri.VertexA]);
-            _triangleInts.Add(vertexIndices[tri.VertexB]);
-            _triangleInts.Add(vertexIndices[tri.VertexC]);
-        }
+        _triangleBuffer.GetData(triangles, 0, 0, _triangleCount[0]);
+        _boundaryEdgeBuffer.GetData(boundaryEdges, 0, 0, _boundaryEdgeCount[0]);
 
         var go = new GameObject($"Chunk ({x}, {y})");
 
-        Dictionary<Edge, int> processedEdgeIndices = new();
-        List<List<Vector2>> edgePaths = new();
+        _processedEdgeIndices.Clear();
+        _edgePaths.Clear();
+        _triangleInts.Clear();
+        _uniqueVertexIndices.Clear();
 
+        foreach (var tri in triangles)
+        {
+            if (!_uniqueVertexIndices.ContainsKey(tri.VertexA))
+            {
+                _uniqueVertexIndices[tri.VertexA] = _uniqueVertexIndices.Count;
+            }
+            
+            if (!_uniqueVertexIndices.ContainsKey(tri.VertexB))
+            {
+                _uniqueVertexIndices[tri.VertexB] = _uniqueVertexIndices.Count;
+            }
+            
+            if (!_uniqueVertexIndices.ContainsKey(tri.VertexC))
+            {
+                _uniqueVertexIndices[tri.VertexC] = _uniqueVertexIndices.Count;
+            }
+            
+            _triangleInts.Add(_uniqueVertexIndices[tri.VertexA]);
+            _triangleInts.Add(_uniqueVertexIndices[tri.VertexB]);
+            _triangleInts.Add(_uniqueVertexIndices[tri.VertexC]);
+        }
+
+        var mesh = new Mesh();
+        // mesh.indexFormat = IndexFormat.UInt32;
+        
+        go.AddComponent<MeshFilter>().mesh = mesh;
+        go.AddComponent<MeshRenderer>().material = meshMaterial;
+        
+        mesh.vertices = _uniqueVertexIndices.Keys.ToArray();
+        mesh.triangles = _triangleInts.ToArray();
+        mesh.RecalculateBounds();
+        
         for (var ei = 0; ei < boundaryEdges.Length; ei++)
         {
             var edge = boundaryEdges[ei];
             
-            if (processedEdgeIndices.ContainsKey(edge)) continue;
+            if (_processedEdgeIndices.ContainsKey(edge)) continue;
         
-            var edgeLoop = new List<Vector2> { edge.VertexA, edge.VertexB };
+            var edgeLoop = new List<Vector2> {edge.VertexA, edge.VertexB};
             ProcessEdgePath(edge, edge, edgeLoop);
         
             if (edgeLoop.Count <= 2) continue;
         
-            edgePaths.Add(edgeLoop);
+            _edgePaths.Add(edgeLoop);
         }
         
-        for (var ei = 0; ei < edgePaths.Count; ei++)
+        for (var ei = 0; ei < _edgePaths.Count; ei++)
         {
-            var edgeVertices = edgePaths[ei];
+            var edgeVertices = _edgePaths[ei];
             // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
             
             // for (var i = 0; i < edgeVertices.Count - 1; i++)
@@ -228,23 +245,13 @@ public class PlanetGenerator : MonoBehaviour
         
         // Debug.Log($"Edge loops: {edgePaths.Count}");
 
-        var mesh = new Mesh();
-        // mesh.indexFormat = IndexFormat.UInt32;
-        
-        go.AddComponent<MeshFilter>().mesh = mesh;
-        go.AddComponent<MeshRenderer>().material = new Material(Shader.Find("Unlit/Texture"));
-        
-        mesh.vertices = vertexIndices.Keys.ToArray();
-        mesh.triangles = _triangleInts.ToArray();
-        mesh.RecalculateBounds();
-        
         return;
 
         void ProcessEdgePath(Edge edge, Edge startEdge, List<Vector2> edgePath, bool backwards = false, int depth = 1)
         {
             if (depth == 1)
             {
-                processedEdgeIndices[startEdge] = 0;
+                _processedEdgeIndices[startEdge] = 0;
             }
 
             // stop if we've looped back to the start
@@ -267,7 +274,7 @@ public class PlanetGenerator : MonoBehaviour
             // recursively find the next edge in the path
             foreach (var otherEdge in boundaryEdges)
             {
-                if (processedEdgeIndices.ContainsKey(otherEdge)) continue;
+                if (_processedEdgeIndices.ContainsKey(otherEdge)) continue;
                 
                 if (edge.VertexA == otherEdge.VertexA) continue;
 
@@ -276,7 +283,7 @@ public class PlanetGenerator : MonoBehaviour
                 {
                     if (edge.VertexA == otherEdge.VertexB)
                     {
-                        processedEdgeIndices[otherEdge] = 0;
+                        _processedEdgeIndices[otherEdge] = 0;
 
                         // skip inserting vertices of the first edge because they're already in the list
                         if (depth != 1)
@@ -295,7 +302,7 @@ public class PlanetGenerator : MonoBehaviour
                 // check if the edge is to the relative RIGHT of the current edge
                 if (edge.VertexB == otherEdge.VertexA)
                 {
-                    processedEdgeIndices[otherEdge] = 0;
+                    _processedEdgeIndices[otherEdge] = 0;
                     
                     // skip inserting vertices of the first edge because they're already in the list
                     if (depth != 1)
@@ -320,6 +327,18 @@ public class PlanetGenerator : MonoBehaviour
                 edgePath.Add(edge.VertexB);
             }
         }
+    }
+
+    private void Terraform(Vector2 localBrushPosition, float brushSize, float brushStrength)
+    {
+        // Assume the brush position is within the planet terrain area.
+        // Assume the brush position is localized to this planet, so that
+        // position (res / 2, res / 2) is the center of the planet.
+        terraformerCs.SetFloat("brush_x", localBrushPosition.x);
+        terraformerCs.SetFloat("brush_y", localBrushPosition.y);
+        terraformerCs.SetFloat("brush_size", brushSize);
+        terraformerCs.SetFloat("brush_strength", brushStrength);
+        terraformerCs.Dispatch(0, resolution / 8, resolution / 8, 1);
     }
 
     // private void OnDrawGizmos()

@@ -2,18 +2,18 @@
 
 struct mesh_triangle
 {
-    float2 vertex_a;
-    float2 vertex_b;
-    float2 vertex_c;
+    half2 vertex_a;
+    half2 vertex_b;
+    half2 vertex_c;
 };
 
 struct mesh_edge
 {
-    float2 vertex_a;
-    float2 vertex_b;
+    half2 vertex_a;
+    half2 vertex_b;
 };
 
-int res;
+uint res;
 float iso_value;
 int chunks_per_side;
 int chunk_x;
@@ -66,7 +66,7 @@ static int boundary_vertex_index_table[14][4] = {
     { 7, 4, -1, -1 }
 };
 
-float inverse_lerp(const float a, const float b, const float v)
+half inverse_lerp(const half a, const half b, const half v)
 {
     return clamp((v - a) / (b - a), 0.0, 1.0);
 }
@@ -77,14 +77,14 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     // each thread processes a cell in a chunk, so we need to skip the last row and column
     if (id.x == res - 1 || id.y == res - 1) return;
 
-    const float chunk_w = float(res) / float(chunks_per_side);
-    const float2 chunk_offset = float2(chunk_x * chunk_w, chunk_y * chunk_w);
-    const float2 offset = float2(id.x + chunk_offset.x, id.y + chunk_offset.y);
+    const half chunk_w = half(res) / half(chunks_per_side);
+    const half2 chunk_offset = half2(chunk_x * chunk_w, chunk_y * chunk_w);
+    const half2 offset = half2(id.x + chunk_offset.x, id.y + chunk_offset.y);
 
-    const float bl = 1.0 - point_map[offset];
-    const float br = 1.0 - point_map[offset + float2(1, 0)];
-    const float tl = 1.0 - point_map[offset + float2(0, 1)];
-    const float tr = 1.0 - point_map[offset + float2(1, 1)];
+    const half bl = 1.0 - point_map[offset];
+    const half br = 1.0 - point_map[offset + half2(1, 0)];
+    const half tl = 1.0 - point_map[offset + half2(0, 1)];
+    const half tr = 1.0 - point_map[offset + half2(1, 1)];
 
     const int bl_bin = bl > iso_value ? 1 : 0;
     const int br_bin = br > iso_value ? 1 : 0;
@@ -100,28 +100,28 @@ void cs_main (uint3 id : SV_DispatchThreadID)
     // skip if the cell is empty
     if (config == 15) return;
     
-    const float bottom_edge_iso_lerp = inverse_lerp(bl, br, iso_value);
-    const float right_edge_iso_lerp = inverse_lerp(br, tr, iso_value);
-    const float top_edge_iso_lerp = inverse_lerp(tl, tr, iso_value);
-    const float left_edge_iso_lerp = inverse_lerp(bl, tl, iso_value);
+    const half bottom_edge_iso_lerp = inverse_lerp(bl, br, iso_value);
+    const half right_edge_iso_lerp = inverse_lerp(br, tr, iso_value);
+    const half top_edge_iso_lerp = inverse_lerp(tl, tr, iso_value);
+    const half left_edge_iso_lerp = inverse_lerp(bl, tl, iso_value);
     
-    // const float bottom_edge_iso_lerp = 0.5;
-    // const float right_edge_iso_lerp = 0.5;
-    // const float top_edge_iso_lerp = 0.5;
-    // const float left_edge_iso_lerp = 0.5;
+    // const half bottom_edge_iso_lerp = 0.5;
+    // const half right_edge_iso_lerp = 0.5;
+    // const half top_edge_iso_lerp = 0.5;
+    // const half left_edge_iso_lerp = 0.5;
 
-    const float x = id.x + chunk_offset.x;
-    const float y = id.y + chunk_offset.y;
+    const half x = id.x + chunk_offset.x;
+    const half y = id.y + chunk_offset.y;
 
-    const float2 cell_vertices[8] = {
-        float2(x, y),
-        float2(x + 1, y),
-        float2(x + 1, y + 1),
-        float2(x, y + 1),
-        float2(x + bottom_edge_iso_lerp, y),
-        float2(x + 1, y + right_edge_iso_lerp),
-        float2(x + top_edge_iso_lerp, y + 1),
-        float2(x, y + left_edge_iso_lerp)
+    const half2 cell_vertices[8] = {
+        half2(x, y),
+        half2(x + 1, y),
+        half2(x + 1, y + 1),
+        half2(x, y + 1),
+        half2(x + bottom_edge_iso_lerp, y),
+        half2(x + 1, y + right_edge_iso_lerp),
+        half2(x + top_edge_iso_lerp, y + 1),
+        half2(x, y + left_edge_iso_lerp)
     };
 
     const int tris[12] = tri_table[config];
