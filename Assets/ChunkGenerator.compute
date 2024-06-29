@@ -71,7 +71,7 @@ half inverse_lerp(const half a, const half b, const half v)
     return clamp((v - a) / (b - a), 0.0, 1.0);
 }
 
-[numthreads(16, 16, 1)]  
+[numthreads(8, 8, 1)]  
 void cs_main (uint3 id : SV_DispatchThreadID)
 {
     // each thread processes a cell in a chunk, so we need to skip the last row and column

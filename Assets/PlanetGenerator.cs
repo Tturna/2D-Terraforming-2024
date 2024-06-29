@@ -244,7 +244,8 @@ public class PlanetGenerator : MonoBehaviour
         _triangleBuffer.SetCounterValue(1);
         _boundaryEdgeBuffer.SetCounterValue(1);
         
-        chunkGeneratorCs.Dispatch(0, 4, 4, 1);
+        var threadGroups = resolution / chunksPerAxis / 8;
+        chunkGeneratorCs.Dispatch(0, threadGroups, threadGroups, 1);
         
         _triangleCountBuffer.SetData(_triangleCount);
         _boundaryEdgeCountBuffer.SetData(_boundaryEdgeCount);

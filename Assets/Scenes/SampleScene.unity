@@ -307,7 +307,7 @@ MonoBehaviour:
   terraformerCs: {fileID: 7200000, guid: 1b7f5a25d7684464f9e681da731b5c3b, type: 3}
   resolution: 256
   isoValue: 0.644
-  chunksPerAxis: 4
+  chunksPerAxis: 8
   meshMaterial: {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}
   brushStrength: 0.102
   noiseScale: 16
