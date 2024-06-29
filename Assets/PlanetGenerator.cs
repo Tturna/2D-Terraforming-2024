@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -14,7 +15,7 @@ public class PlanetGenerator : MonoBehaviour
         public Vector2 VertexC;
     }
     
-    private struct Edge
+    public struct Edge
     {
         public Vector2 VertexA;
         public Vector2 VertexB;
@@ -243,7 +244,6 @@ public class PlanetGenerator : MonoBehaviour
         _triangleBuffer.SetCounterValue(1);
         _boundaryEdgeBuffer.SetCounterValue(1);
         
-        // planetGenCs.Dispatch(0, resolution / 8, resolution / 8, 1);
         chunkGeneratorCs.Dispatch(0, 4, 4, 1);
         
         _triangleCountBuffer.SetData(_triangleCount);
@@ -295,45 +295,54 @@ public class PlanetGenerator : MonoBehaviour
         mesh.triangles = _triangleInts.ToArray();
         mesh.RecalculateBounds();
         chunk.Mesh = mesh;
+
+        var trPos = transform.position;
+        var qtBounds = new Vector4(trPos.x, trPos.y, resolution, resolution);
+        var qt = new EdgeQuadtree(qtBounds);
+
+        foreach (var edge in boundaryEdges)
+        {
+            qt.Insert(edge);
+        }
         
-        // for (var ei = 0; ei < boundaryEdges.Length; ei++)
-        // {
-        //     var edge = boundaryEdges[ei];
-        //     
-        //     if (_processedEdgeIndices.ContainsKey(edge)) continue;
-        //
-        //     var edgeLoop = new List<Vector2> { edge.VertexA, edge.VertexB };
-        //     ProcessEdgePath(edge, edge, edgeLoop);
-        //
-        //     if (edgeLoop.Count <= 2) continue;
-        //
-        //     _edgePaths.Add(edgeLoop);
-        // }
-        //
-        // // TODO: figure out a better system for updating edge colliders.
-        // // Preferably, we should only update the edge colliders that have changed.
-        // var existingEdgeColliders = go.GetComponents<EdgeCollider2D>();
-        // for (var i = 0; i < existingEdgeColliders.Length; i++)
-        // {
-        //     Destroy(existingEdgeColliders[i]);
-        // }
-        //
-        // for (var ei = 0; ei < _edgePaths.Count; ei++)
-        // {
-        //     var edgeVertices = _edgePaths[ei];
-        //     // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
-        //     
-        //     // for (var i = 0; i < edgeVertices.Count - 1; i++)
-        //     // {
-        //     //     var color = Color.HSVToRGB(ei / (float)edgePaths.Count, i / (float)edgeVertices.Count / 1.2f, 1);
-        //     //     var a = edgeVertices[i];
-        //     //     var b = edgeVertices[(i + 1) % edgeVertices.Count];
-        //     //     Debug.DrawLine(a, b, color, 300);
-        //     // }
-        //
-        //     var edgeCollider = go.AddComponent<EdgeCollider2D>();
-        //     edgeCollider.points = edgeVertices.ToArray();
-        // }
+        for (var ei = 0; ei < boundaryEdges.Length; ei++)
+        {
+            var edge = boundaryEdges[ei];
+            
+            if (_processedEdgeIndices.ContainsKey(edge)) continue;
+        
+            var edgeLoop = new List<Vector2> { edge.VertexA, edge.VertexB };
+            ProcessEdgePath(edge, edge, edgeLoop);
+        
+            if (edgeLoop.Count <= 2) continue;
+        
+            _edgePaths.Add(edgeLoop);
+        }
+        
+        // TODO: figure out a better system for updating edge colliders.
+        // Preferably, we should only update the edge colliders that have changed.
+        var existingEdgeColliders = go.GetComponents<EdgeCollider2D>();
+        for (var i = 0; i < existingEdgeColliders.Length; i++)
+        {
+            Destroy(existingEdgeColliders[i]);
+        }
+        
+        for (var ei = 0; ei < _edgePaths.Count; ei++)
+        {
+            var edgeVertices = _edgePaths[ei];
+            // var color = Color.HSVToRGB(ei / (float)edgeLoops.Count, 1, 1);
+            
+            // for (var i = 0; i < edgeVertices.Count - 1; i++)
+            // {
+            //     var color = Color.HSVToRGB(ei / (float)edgePaths.Count, i / (float)edgeVertices.Count / 1.2f, 1);
+            //     var a = edgeVertices[i];
+            //     var b = edgeVertices[(i + 1) % edgeVertices.Count];
+            //     Debug.DrawLine(a, b, color, 300);
+            // }
+        
+            var edgeCollider = go.AddComponent<EdgeCollider2D>();
+            edgeCollider.points = edgeVertices.ToArray();
+        }
         
         // Debug.Log($"Edge loops: {edgePaths.Count}");
 
@@ -363,8 +372,23 @@ public class PlanetGenerator : MonoBehaviour
             
             var nextEdgeFound = false;
 
+            var queryPoint = backwards ? edge.VertexA : edge.VertexB;
+            var edgesCloseToNext = qt.GetLeafIncludingPoint(queryPoint);
+
+            if (edgesCloseToNext == null)
+                throw new NullReferenceException("Quadtree doesn't contain edge.");
+
+            if (depth == 1)
+            {
+                var edgesCloseToA = qt.GetLeafIncludingPoint(edge.VertexA);
+                if (edgesCloseToA != null)
+                {
+                    edgesCloseToNext.AddRange(edgesCloseToA);
+                }
+            }
+
             // recursively find the next edge in the path
-            foreach (var otherEdge in boundaryEdges)
+            foreach (var otherEdge in edgesCloseToNext)
             {
                 if (_processedEdgeIndices.ContainsKey(otherEdge)) continue;
                 
@@ -421,7 +445,7 @@ public class PlanetGenerator : MonoBehaviour
         }
     }
 
-    private void Terraform(Vector2 localBrushPosition, float brushSize, float brushStrength)
+    private void Terraform(Vector2 localBrushPosition, float brushSize, float strength)
     {
         // Assume the brush position is within the planet terrain area.
         // Assume the brush position is localized to this planet, so that
@@ -429,7 +453,7 @@ public class PlanetGenerator : MonoBehaviour
         terraformerCs.SetFloat("brush_x", localBrushPosition.x);
         terraformerCs.SetFloat("brush_y", localBrushPosition.y);
         terraformerCs.SetFloat("brush_size", brushSize);
-        terraformerCs.SetFloat("brush_strength", brushStrength);
+        terraformerCs.SetFloat("brush_strength", strength);
         terraformerCs.SetFloat("brush_smoothing", 0.2f);
         terraformerCs.Dispatch(0, resolution / 8, resolution / 8, 1);
 
