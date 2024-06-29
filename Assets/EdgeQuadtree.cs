@@ -40,6 +40,9 @@ public class EdgeQuadtree
         var h = Bounds.w;
         var px = point.x;
         var py = point.y;
+        // Using >= and <= will cause edge cases to be included in
+        // multiple quads. For this issue we're applying the
+        // ostrich algorithm because it doesn't slow down queries.
         return px >= x && px <= x + w && py >= y && py <= y + h;
     }
 
